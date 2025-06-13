@@ -5,6 +5,16 @@ A [Prometheus](prometheus.io) exporter that translates between Prometheus and (s
 It is implemented in a very similar way to [blackbox_exporter](https://github.com/prometheus/blackbox_exporter) which allows you to run it
 as a "proxy" querying the power socket on the go and returns specific metrics for that power socket using targets and relabeling.
 
+## Docker Support
+
+The application is available as a Docker image. You can run it using:
+
+```bash
+docker run -p 9090:9090 ghcr.io/yourusername/tasmota-exporter
+```
+
+Replace `yourusername` with your GitHub username. The image will be automatically built and pushed to GitHub Container Registry when you push to the main branch.
+
 ## Tested with
 
 - Avatar UK 10A
