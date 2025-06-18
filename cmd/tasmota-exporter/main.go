@@ -28,9 +28,13 @@ var (
 	factorGauge,
 	todayGauge,
 	yesterdayGauge,
-	totalGauge prometheus.Gauge
+	totalGauge,
+	dailyLastGauge prometheus.Gauge
 
 	registry *prometheus.Registry
+
+	// Track the last day we sent the daily last metric
+	lastDailyMetricSent time.Time
 )
 
 func init() {
@@ -74,6 +78,10 @@ func init() {
 		Name: "tasmota_kwh_total",
 		Help: "total energy usage in kilowatts hours (kWh)",
 	})
+	dailyLastGauge = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "tasmota_daily_last_kwh_total",
+		Help: "The last kWh reading of the day, sent once per day between 23:58:00 and 23:59:59",
+	})
 
 	registry = prometheus.NewRegistry()
 	registry.MustRegister(onGauge)
@@ -86,6 +94,7 @@ func init() {
 	registry.MustRegister(todayGauge)
 	registry.MustRegister(yesterdayGauge)
 	registry.MustRegister(totalGauge)
+	registry.MustRegister(dailyLastGauge)
 }
 
 func main() {
@@ -166,6 +175,36 @@ func isMidnightTransition() bool {
 	return false
 }
 
+// isDailyMetricWindow checks if we're in the window to send the daily last metric (23:58:00 to 23:59:59)
+func isDailyMetricWindow() bool {
+	now := time.Now()
+	hour := now.Hour()
+	minute := now.Minute()
+	second := now.Second()
+
+	return hour == 23 && (minute == 58 || minute == 59)
+}
+
+// shouldSendDailyMetric checks if we should send the daily metric
+// Returns true if we're in the time window and haven't sent it today
+func shouldSendDailyMetric() bool {
+	now := time.Now()
+	
+	// If we're not in the time window, don't send
+	if !isDailyMetricWindow() {
+		return false
+	}
+
+	// If we haven't sent it today, we should send it
+	if lastDailyMetricSent.Day() != now.Day() || 
+	   lastDailyMetricSent.Month() != now.Month() || 
+	   lastDailyMetricSent.Year() != now.Year() {
+		return true
+	}
+
+	return false
+}
+
 func probeTasmota(ctx context.Context, target string, registry *prometheus.Registry) (success bool) {
 	client := http.Client{
 		Timeout: 5 * time.Second,
@@ -206,6 +245,12 @@ func probeTasmota(ctx context.Context, target string, registry *prometheus.Regis
 	
 	yesterdayGauge.Set(tp.Yesterday)
 	totalGauge.Set(tp.Total)
+
+	// Handle daily last metric
+	if shouldSendDailyMetric() {
+		dailyLastGauge.Set(tp.Today)
+		lastDailyMetricSent = time.Now()
+	}
 
 	return true
 }
