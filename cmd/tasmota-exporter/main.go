@@ -180,7 +180,6 @@ func isDailyMetricWindow() bool {
 	now := time.Now()
 	hour := now.Hour()
 	minute := now.Minute()
-	second := now.Second()
 
 	return hour == 23 && (minute == 58 || minute == 59)
 }
