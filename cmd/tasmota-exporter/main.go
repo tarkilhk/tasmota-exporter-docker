@@ -33,8 +33,8 @@ var (
 
 	registry *prometheus.Registry
 
-	// Track the last day we sent the daily last metric
-	lastDailyMetricSent time.Time
+	// Track the last day we sent the daily last metric per target
+	lastDailyMetricSent map[string]time.Time
 )
 
 func init() {
@@ -95,9 +95,17 @@ func init() {
 	registry.MustRegister(yesterdayGauge)
 	registry.MustRegister(totalGauge)
 	registry.MustRegister(dailyLastGauge)
+
+	// Initialize the map to track daily metrics per target
+	lastDailyMetricSent = make(map[string]time.Time)
 }
 
 func main() {
+	// Note: Go's log package uses UTC by default
+	// To see local time in logs, you can set TZ environment variable
+	// or use a custom logging solution
+	log.SetFlags(log.LstdFlags)
+
 	http.HandleFunc("/probe", tasmotaHandler)
 
 	listenAddr := ":9090"
@@ -137,7 +145,7 @@ func tasmotaHandler(w http.ResponseWriter, r *http.Request) {
 	r = r.WithContext(ctx)
 
 	start := time.Now()
-	success := probeTasmota(ctx, target, registry)
+	success := probeTasmota(target)
 	duration := time.Since(start).Seconds()
 	probeDurationGauge.Set(duration)
 	if success {
@@ -176,35 +184,38 @@ func tasmotaHandler(w http.ResponseWriter, r *http.Request) {
 // }
 
 // isDailyMetricWindow checks if we're in the window to send the daily last metric (23:58:00 to 23:59:59)
-func isDailyMetricWindow() bool {
-	now := time.Now()
-	hour := now.Hour()
-	minute := now.Minute()
-
+func isDailyMetricWindow(t time.Time) bool {
+	hour := t.Hour()
+	minute := t.Minute()
 	return hour == 23 && (minute == 58 || minute == 59)
 }
 
 // shouldSendDailyMetric checks if we should send the daily metric
 // Returns true if we're in the time window and haven't sent it today
-func shouldSendDailyMetric() bool {
+func shouldSendDailyMetric(target string) bool {
 	now := time.Now()
 
 	// If we're not in the time window, don't send
-	if !isDailyMetricWindow() {
+	if !isDailyMetricWindow(now) {
 		return false
 	}
 
+	log.Printf("[%s] We may have to send the last daily metric", target)
+
 	// If we haven't sent it today, we should send it
-	if lastDailyMetricSent.Day() != now.Day() ||
-		lastDailyMetricSent.Month() != now.Month() ||
-		lastDailyMetricSent.Year() != now.Year() {
+	if lastDailyMetricSent[target].Day() != now.Day() ||
+		lastDailyMetricSent[target].Month() != now.Month() ||
+		lastDailyMetricSent[target].Year() != now.Year() {
+		log.Printf("[%s] We didn't send the last daily metric yet, so we should send it", target)
 		return true
 	}
+
+	log.Printf("[%s] We already sent the last daily metric at %s, so we don't need to send it again", target, lastDailyMetricSent[target])
 
 	return false
 }
 
-func probeTasmota(ctx context.Context, target string, registry *prometheus.Registry) (success bool) {
+func probeTasmota(target string) (success bool) {
 	client := http.Client{
 		Timeout: 5 * time.Second,
 	}
@@ -247,9 +258,9 @@ func probeTasmota(ctx context.Context, target string, registry *prometheus.Regis
 	totalGauge.Set(tp.Total)
 
 	// Handle daily last metric
-	if shouldSendDailyMetric() {
+	if shouldSendDailyMetric(target) {
 		dailyLastGauge.Set(tp.Today)
-		lastDailyMetricSent = time.Now()
+		lastDailyMetricSent[target] = time.Now()
 	}
 
 	return true

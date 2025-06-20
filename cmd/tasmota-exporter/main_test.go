@@ -2,6 +2,7 @@ package main
 
 import (
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 )
@@ -202,5 +203,86 @@ func TestParser(t *testing.T) {
 				t.Errorf("unexpected parsed output (-want +got):\n%s", diff)
 			}
 		})
+	}
+}
+
+func TestDailyMetricFunctions(t *testing.T) {
+	// Reset the global map for testing
+	lastDailyMetricSent = make(map[string]time.Time)
+
+	target1 := "192.168.1.100"
+	target2 := "192.168.1.101"
+
+	// Test the core logic by manually setting the map entries
+	t.Run("map-tracking-different-targets", func(t *testing.T) {
+		// Simulate sending daily metric for target1
+		lastDailyMetricSent[target1] = time.Now()
+
+		// Check that target1 is tracked
+		if _, exists := lastDailyMetricSent[target1]; !exists {
+			t.Errorf("Expected target1 to be in lastDailyMetricSent map")
+		}
+
+		// Check that target2 is not tracked yet
+		if _, exists := lastDailyMetricSent[target2]; exists {
+			t.Errorf("Expected target2 to NOT be in lastDailyMetricSent map yet")
+		}
+
+		// Simulate sending daily metric for target2
+		lastDailyMetricSent[target2] = time.Now()
+
+		// Check that both targets are now tracked
+		if _, exists := lastDailyMetricSent[target1]; !exists {
+			t.Errorf("Expected target1 to be in lastDailyMetricSent map")
+		}
+		if _, exists := lastDailyMetricSent[target2]; !exists {
+			t.Errorf("Expected target2 to be in lastDailyMetricSent map")
+		}
+	})
+
+	t.Run("map-independence", func(t *testing.T) {
+		// Clear the map
+		lastDailyMetricSent = make(map[string]time.Time)
+
+		// Set different times for different targets
+		time1 := time.Date(2024, 1, 15, 23, 58, 0, 0, time.UTC)
+		time2 := time.Date(2024, 1, 15, 23, 59, 0, 0, time.UTC)
+
+		lastDailyMetricSent[target1] = time1
+		lastDailyMetricSent[target2] = time2
+
+		// Verify they're independent
+		if lastDailyMetricSent[target1] != time1 {
+			t.Errorf("Expected target1 to have time1, got %v", lastDailyMetricSent[target1])
+		}
+		if lastDailyMetricSent[target2] != time2 {
+			t.Errorf("Expected target2 to have time2, got %v", lastDailyMetricSent[target2])
+		}
+	})
+}
+
+func TestIsDailyMetricWindow(t *testing.T) {
+	// Time outside the window
+	outside := time.Date(2024, 1, 15, 12, 0, 0, 0, time.UTC) // 12:00
+	if isDailyMetricWindow(outside) {
+		t.Errorf("Expected isDailyMetricWindow to return false for 12:00, got true")
+	}
+
+	// Time inside the window
+	inside := time.Date(2024, 1, 15, 23, 58, 0, 0, time.UTC) // 23:58
+	if !isDailyMetricWindow(inside) {
+		t.Errorf("Expected isDailyMetricWindow to return true for 23:58, got false")
+	}
+
+	// Another time inside the window
+	inside2 := time.Date(2024, 1, 15, 23, 59, 0, 0, time.UTC) // 23:59
+	if !isDailyMetricWindow(inside2) {
+		t.Errorf("Expected isDailyMetricWindow to return true for 23:59, got false")
+	}
+
+	// Edge case: 00:00 (should be false)
+	edge := time.Date(2024, 1, 16, 0, 0, 0, 0, time.UTC) // 00:00
+	if isDailyMetricWindow(edge) {
+		t.Errorf("Expected isDailyMetricWindow to return false for 00:00, got true")
 	}
 }
