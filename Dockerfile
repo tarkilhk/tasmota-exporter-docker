@@ -17,6 +17,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o tasmota-exporter ./cmd/tasmota-exporter
 
 # Final stage
 FROM alpine:latest
+RUN apk add --no-cache tzdata
 
 WORKDIR /app
 
