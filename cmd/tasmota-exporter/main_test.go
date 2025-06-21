@@ -286,3 +286,45 @@ func TestIsDailyMetricWindow(t *testing.T) {
 		t.Errorf("Expected isDailyMetricWindow to return false for 00:00, got true")
 	}
 }
+
+func TestTodayValue_MidnightTransitionLogic(t *testing.T) {
+	mockTasmotaData := `{t}</table><hr/>{t}{s}</th><th></th><th style='text-align:center'><th></th><td>{e}{s}Voltage{m}</td><td style='text-align:left'>237</td><td>&nbsp;</td><td> V{e}{s}Current{m}</td><td style='text-align:left'>0.053</td><td>&nbsp;</td><td> A{e}{s}Active Power{m}</td><td style='text-align:left'>7</td><td>&nbsp;</td><td> W{e}{s}Apparent Power{m}</td><td style='text-align:left'>13</td><td>&nbsp;</td><td> VA{e}{s}Reactive Power{m}</td><td style='text-align:left'>10</td><td>&nbsp;</td><td> VAr{e}{s}Power Factor{m}</td><td style='text-align:left'>0.59</td><td>&nbsp;</td><td>                         {e}{s}Energy Today{m}</td><td style='text-align:left'>42.42</td><td>&nbsp;</td><td> kWh{e}{s}Energy Yesterday{m}</td><td style='text-align:left'>0.016</td><td>&nbsp;</td><td> kWh{e}{s}Energy Total{m}</td><td style='text-align:left'>3.334</td><td>&nbsp;</td><td> kWh{e}</table><hr/>{t}</table>{t}<tr><td style='width:100%;text-align:center;font-weight:bold;font-size:62px'>ON</td></tr><tr></tr></table>`
+
+	tp := parse(mockTasmotaData)
+
+	tests := []struct {
+		name     string
+		time     time.Time
+		expected float64
+	}{
+		{
+			name:     "outside midnight window",
+			time:     time.Date(2024, 1, 15, 12, 0, 0, 0, time.UTC),
+			expected: tp.Today,
+		},
+		{
+			name:     "inside midnight window (23:59:30)",
+			time:     time.Date(2024, 1, 15, 23, 59, 30, 0, time.UTC),
+			expected: 0,
+		},
+		{
+			name:     "inside midnight window (00:00:30)",
+			time:     time.Date(2024, 1, 16, 0, 0, 30, 0, time.UTC),
+			expected: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var today float64
+			if isMidnightTransition(tt.time) {
+				today = 0
+			} else {
+				today = tp.Today
+			}
+			if today != tt.expected {
+				t.Errorf("For time %v, expected Today value %v, got %v", tt.time, tt.expected, today)
+			}
+		})
+	}
+}

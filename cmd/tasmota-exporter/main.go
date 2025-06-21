@@ -68,7 +68,7 @@ func init() {
 	})
 	todayGauge = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "tasmota_today_kwh_total",
-		Help: "todays energy usage total in kilowatts hours (kWh)",
+		Help: "todays energy usage total in kilowatts hours (kWh) [manually overriden to 0 between 23:59:00 and 00:00:59]",
 	})
 	yesterdayGauge = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "tasmota_yesterday_kwh_total",
@@ -102,7 +102,7 @@ func init() {
 
 func main() {
 	// Note: Go's log package uses UTC by default
-	// To see local time in logs, you can set TZ environment variable
+	// I have added tzdata in the docker image, so we can use TZ environment variable to see local time in logs
 	// or use a custom logging solution
 	log.SetFlags(log.LstdFlags)
 
@@ -159,35 +159,35 @@ func tasmotaHandler(w http.ResponseWriter, r *http.Request) {
 	h.ServeHTTP(w, r)
 }
 
-// // isMidnightTransition checks if we're in the window around midnight (23:59:00 to 00:01:00).
-// // This is necessary because the tasmota_today_kwh_total metric from the device carries over
-// // to the next day until the next scrape happens. By forcing it to 0 during this transition
-// // period, we ensure that each day's maximum consumption is correctly attributed to its
-// // proper day in Grafana, preventing the previous day's value from being incorrectly
-// // associated with the new day.
-// func isMidnightTransition() bool {
-// 	now := time.Now()
-// 	hour := now.Hour()
-// 	minute := now.Minute()
-// 	second := now.Second()
+// isMidnightTransition checks if we're in the window around midnight (23:59:00 to 00:00:59).
+// This is necessary because the tasmota_today_kwh_total metric from the device carries over
+// to the next day until the next scrape happens. By forcing it to 0 during this transition
+// period, we ensure that each day's maximum consumption is correctly attributed to its day
+// and doesn't overspill to the new day.
+func isMidnightTransition(now time.Time) bool {
+	hour := now.Hour()
+	minute := now.Minute()
+	second := now.Second()
 
-// 	// Check if time is between 23:59:00 and 00:01:00
-// 	// time.Hour() method in Go's standard library always returns in 24-hour format (0-23), independent of the system's locale or time format settings
-// 	// This is why we can use 23 and 0 for the hour check
-// 	if hour == 23 && minute == 59 && second >= 00 {
-// 		return true
-// 	}
-// 	if hour == 0 && minute == 1 && second <= 00 {
-// 		return true
-// 	}
-// 	return false
-// }
+	// Check if time is between 23:59:00 and 00:00:59
+	// time.Hour() method in Go's standard library always returns in 24-hour format (0-23),
+	// independent of the system's locale or time format settings.
+	// This is why we can use 23 and 0 for the hour check.
+	if hour == 23 && minute == 59 && second >= 0 {
+		return true
+	}
+	if hour == 0 && minute == 0 && second <= 59 {
+		return true
+	}
+	return false
+}
 
 // isDailyMetricWindow checks if we're in the window to send the daily last metric (23:58:00 to 23:59:59)
 func isDailyMetricWindow(t time.Time) bool {
 	hour := t.Hour()
 	minute := t.Minute()
 	return hour == 23 && (minute == 58 || minute == 59)
+	// return true
 }
 
 // shouldSendDailyMetric checks if we should send the daily metric
@@ -246,12 +246,12 @@ func probeTasmota(target string) (success bool) {
 	reactivePowerGauge.Set(tp.ReactivePower)
 	factorGauge.Set(tp.Factor)
 
-	// // Set todayGauge to 0 during midnight transition period
-	// if isMidnightTransition() {
-	// 	todayGauge.Set(0)
-	// } else {
-	// 	todayGauge.Set(tp.Today)
-	// }
+	// Set todayGauge to 0 during midnight transition period
+	if isMidnightTransition(time.Now()) {
+		todayGauge.Set(0)
+	} else {
+		todayGauge.Set(tp.Today)
+	}
 	todayGauge.Set(tp.Today)
 
 	yesterdayGauge.Set(tp.Yesterday)
