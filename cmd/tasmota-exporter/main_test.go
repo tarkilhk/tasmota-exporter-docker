@@ -206,6 +206,51 @@ func TestParser(t *testing.T) {
 	}
 }
 
+func TestGetTodayValue(t *testing.T) {
+	// We need to be able to control the time for this test
+	originalNowFunc := getNow
+	defer func() { getNow = originalNowFunc }()
+
+	mockTasmotaTodayValue := 42.42
+
+	tests := []struct {
+		name        string
+		mockTime    time.Time
+		expectToday float64
+	}{
+		{
+			name:        "10:00 - not in transition window",
+			mockTime:    time.Date(2024, 7, 26, 10, 0, 0, 0, time.UTC),
+			expectToday: 42.42,
+		},
+		{
+			name:        "23:59 - in transition window",
+			mockTime:    time.Date(2024, 7, 26, 23, 59, 15, 0, time.UTC),
+			expectToday: 0,
+		},
+		{
+			name:        "00:00 - in transition window",
+			mockTime:    time.Date(2024, 7, 27, 0, 0, 30, 0, time.UTC),
+			expectToday: 0,
+		},
+		{
+			name:        "00:01 - not in transition window anymore",
+			mockTime:    time.Date(2024, 7, 27, 0, 1, 0, 0, time.UTC),
+			expectToday: 42.42,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			getNow = func() time.Time { return tt.mockTime }
+			got := getTodayValue(mockTasmotaTodayValue)
+			if got != tt.expectToday {
+				t.Errorf("incorrect today value: got %v, want %v", got, tt.expectToday)
+			}
+		})
+	}
+}
+
 func TestDailyMetricFunctions(t *testing.T) {
 	// Reset the global map for testing
 	lastDailyMetricSent = make(map[string]time.Time)

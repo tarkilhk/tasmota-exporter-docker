@@ -35,6 +35,8 @@ var (
 
 	// Track the last day we sent the daily last metric per target
 	lastDailyMetricSent map[string]time.Time
+
+	getNow = time.Now
 )
 
 func init() {
@@ -169,14 +171,18 @@ func isMidnightTransition(now time.Time) bool {
 	minute := now.Minute()
 	second := now.Second()
 
+	log.Printf("isMidnightTransition: checking time: %s (h: %d, m: %d, s: %d)", now.Format(time.RFC3339), hour, minute, second)
+
 	// Check if time is between 23:59:00 and 00:00:59
 	// time.Hour() method in Go's standard library always returns in 24-hour format (0-23),
 	// independent of the system's locale or time format settings.
 	// This is why we can use 23 and 0 for the hour check.
-	if hour == 23 && minute == 59 && second >= 0 {
+	if hour == 23 && minute == 59 {
+		log.Println("isMidnightTransition: returning true (23:59 case)")
 		return true
 	}
-	if hour == 0 && minute == 0 && second <= 59 {
+	if hour == 0 && minute == 0 {
+		log.Println("isMidnightTransition: returning true (00:00 case)")
 		return true
 	}
 	return false
@@ -193,19 +199,19 @@ func isDailyMetricWindow(t time.Time) bool {
 // shouldSendDailyMetric checks if we should send the daily metric
 // Returns true if we're in the time window and haven't sent it today
 func shouldSendDailyMetric(target string) bool {
-	now := time.Now()
+	n := getNow()
 
 	// If we're not in the time window, don't send
-	if !isDailyMetricWindow(now) {
+	if !isDailyMetricWindow(n) {
 		return false
 	}
 
 	log.Printf("[%s] We may have to send the last daily metric", target)
 
 	// If we haven't sent it today, we should send it
-	if lastDailyMetricSent[target].Day() != now.Day() ||
-		lastDailyMetricSent[target].Month() != now.Month() ||
-		lastDailyMetricSent[target].Year() != now.Year() {
+	if lastDailyMetricSent[target].Day() != n.Day() ||
+		lastDailyMetricSent[target].Month() != n.Month() ||
+		lastDailyMetricSent[target].Year() != n.Year() {
 		log.Printf("[%s] We didn't send the last daily metric yet, so we should send it", target)
 		return true
 	}
@@ -246,13 +252,7 @@ func probeTasmota(target string) (success bool) {
 	reactivePowerGauge.Set(tp.ReactivePower)
 	factorGauge.Set(tp.Factor)
 
-	// Set todayGauge to 0 during midnight transition period
-	if isMidnightTransition(time.Now()) {
-		todayGauge.Set(0)
-	} else {
-		todayGauge.Set(tp.Today)
-	}
-	todayGauge.Set(tp.Today)
+	todayGauge.Set(getTodayValue(tp.Today))
 
 	yesterdayGauge.Set(tp.Yesterday)
 	totalGauge.Set(tp.Total)
@@ -260,10 +260,20 @@ func probeTasmota(target string) (success bool) {
 	// Handle daily last metric
 	if shouldSendDailyMetric(target) {
 		dailyLastGauge.Set(tp.Today)
-		lastDailyMetricSent[target] = time.Now()
+		lastDailyMetricSent[target] = getNow()
 	}
 
 	return true
+}
+
+func getTodayValue(tasmotaToday float64) float64 {
+	if isMidnightTransition(getNow()) {
+		log.Printf("Midnight transition detected. Setting todayGauge to 0.")
+		return 0
+	}
+
+	log.Printf("Not in midnight transition. Setting todayGauge to %f.", tasmotaToday)
+	return tasmotaToday
 }
 
 type TasmotaPlug struct {
