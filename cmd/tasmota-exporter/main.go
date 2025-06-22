@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -261,6 +262,13 @@ func probeTasmota(target string) (success bool) {
 	if shouldSendDailyMetric(target) {
 		dailyLastGauge.Set(tp.Today)
 		lastDailyMetricSent[target] = getNow()
+	} else {
+		// If the metric should not be sent for this target at this time,
+		// we must explicitly set the gauge to NaN. If we don't, the gauge
+		// will continue to expose the last value it was set to, which may
+		// have been for a different target. This would cause all targets
+		// to incorrectly report the same "last daily" value.
+		dailyLastGauge.Set(math.NaN())
 	}
 
 	return true
@@ -272,7 +280,7 @@ func getTodayValue(tasmotaToday float64) float64 {
 		return 0
 	}
 
-	log.Printf("Not in midnight transition. Setting todayGauge to %f.", tasmotaToday)
+	// log.Printf("Not in midnight transition. Setting todayGauge to %f.", tasmotaToday)
 	return tasmotaToday
 }
 

@@ -1,10 +1,12 @@
 package main
 
 import (
+	"math"
 	"testing"
 	"time"
 
 	"github.com/google/go-cmp/cmp"
+	promtest "github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 func TestParser(t *testing.T) {
@@ -251,59 +253,81 @@ func TestGetTodayValue(t *testing.T) {
 	}
 }
 
-func TestDailyMetricFunctions(t *testing.T) {
-	// Reset the global map for testing
-	lastDailyMetricSent = make(map[string]time.Time)
+func TestHandleDailyLastMetric(t *testing.T) {
+	// We need to be able to control the time for this test
+	originalNowFunc := getNow
+	defer func() { getNow = originalNowFunc }()
 
-	target1 := "192.168.1.100"
-	target2 := "192.168.1.101"
+	// We need to reset the state for each test run
+	originalLastDailyMetricSent := lastDailyMetricSent
+	defer func() { lastDailyMetricSent = originalLastDailyMetricSent }()
 
-	// Test the core logic by manually setting the map entries
-	t.Run("map-tracking-different-targets", func(t *testing.T) {
-		// Simulate sending daily metric for target1
-		lastDailyMetricSent[target1] = time.Now()
+	target := "test-target"
+	mockPlug := TasmotaPlug{Today: 1.234}
 
-		// Check that target1 is tracked
-		if _, exists := lastDailyMetricSent[target1]; !exists {
-			t.Errorf("Expected target1 to be in lastDailyMetricSent map")
-		}
+	tests := []struct {
+		name             string
+		mockTime         time.Time
+		setupSentMap     func()
+		expectGaugeValue float64
+	}{
+		{
+			name:             "not in window - should set gauge to NaN",
+			mockTime:         time.Date(2024, 7, 26, 10, 0, 0, 0, time.UTC),
+			expectGaugeValue: math.NaN(),
+		},
+		{
+			name:             "in window, not sent yet - should set gauge to value",
+			mockTime:         time.Date(2024, 7, 26, 23, 58, 0, 0, time.UTC),
+			expectGaugeValue: mockPlug.Today,
+		},
+		{
+			name:     "in window, but already sent today - should set gauge to NaN",
+			mockTime: time.Date(2024, 7, 26, 23, 59, 0, 0, time.UTC),
+			setupSentMap: func() {
+				lastDailyMetricSent[target] = time.Date(2024, 7, 26, 23, 58, 0, 0, time.UTC)
+			},
+			expectGaugeValue: math.NaN(),
+		},
+		{
+			name: "next day, in window - should set gauge to value again",
+			setupSentMap: func() {
+				lastDailyMetricSent[target] = time.Date(2024, 7, 26, 23, 58, 0, 0, time.UTC)
+			},
+			mockTime:         time.Date(2024, 7, 27, 23, 58, 0, 0, time.UTC),
+			expectGaugeValue: mockPlug.Today,
+		},
+	}
 
-		// Check that target2 is not tracked yet
-		if _, exists := lastDailyMetricSent[target2]; exists {
-			t.Errorf("Expected target2 to NOT be in lastDailyMetricSent map yet")
-		}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Reset the state for a clean test run
+			lastDailyMetricSent = make(map[string]time.Time)
+			dailyLastGauge.Set(0) // Reset gauge to a known state
 
-		// Simulate sending daily metric for target2
-		lastDailyMetricSent[target2] = time.Now()
+			if tt.setupSentMap != nil {
+				tt.setupSentMap()
+			}
 
-		// Check that both targets are now tracked
-		if _, exists := lastDailyMetricSent[target1]; !exists {
-			t.Errorf("Expected target1 to be in lastDailyMetricSent map")
-		}
-		if _, exists := lastDailyMetricSent[target2]; !exists {
-			t.Errorf("Expected target2 to be in lastDailyMetricSent map")
-		}
-	})
+			getNow = func() time.Time { return tt.mockTime }
 
-	t.Run("map-independence", func(t *testing.T) {
-		// Clear the map
-		lastDailyMetricSent = make(map[string]time.Time)
+			// Call the function that contains the logic we are testing
+			handleDailyLastMetric(target, mockPlug)
 
-		// Set different times for different targets
-		time1 := time.Date(2024, 1, 15, 23, 58, 0, 0, time.UTC)
-		time2 := time.Date(2024, 1, 15, 23, 59, 0, 0, time.UTC)
+			// Get the resulting metric value
+			metricValue := promtest.ToFloat64(dailyLastGauge)
 
-		lastDailyMetricSent[target1] = time1
-		lastDailyMetricSent[target2] = time2
-
-		// Verify they're independent
-		if lastDailyMetricSent[target1] != time1 {
-			t.Errorf("Expected target1 to have time1, got %v", lastDailyMetricSent[target1])
-		}
-		if lastDailyMetricSent[target2] != time2 {
-			t.Errorf("Expected target2 to have time2, got %v", lastDailyMetricSent[target2])
-		}
-	})
+			if math.IsNaN(tt.expectGaugeValue) {
+				if !math.IsNaN(metricValue) {
+					t.Errorf("dailyLastGauge value = %v, want NaN", metricValue)
+				}
+			} else {
+				if metricValue != tt.expectGaugeValue {
+					t.Errorf("dailyLastGauge value = %v, want %v", metricValue, tt.expectGaugeValue)
+				}
+			}
+		})
+	}
 }
 
 func TestIsDailyMetricWindow(t *testing.T) {
