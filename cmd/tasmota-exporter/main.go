@@ -170,9 +170,9 @@ func tasmotaHandler(w http.ResponseWriter, r *http.Request) {
 func isMidnightTransition(now time.Time) bool {
 	hour := now.Hour()
 	minute := now.Minute()
-	second := now.Second()
+	// second := now.Second()
 
-	log.Printf("isMidnightTransition: checking time: %s (h: %d, m: %d, s: %d)", now.Format(time.RFC3339), hour, minute, second)
+	// log.Printf("isMidnightTransition: checking time: %s (h: %d, m: %d, s: %d)", now.Format(time.RFC3339), hour, minute, second)
 
 	// Check if time is between 23:59:00 and 00:00:59
 	// time.Hour() method in Go's standard library always returns in 24-hour format (0-23),
